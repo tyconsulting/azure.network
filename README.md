@@ -130,10 +130,11 @@ This stage consists of the following steps:
 
 ### **lab_deploy** stage
 
-This stage consists of the following ARM deployment tasks
+This stage consists of the following ARM deployment tasks:
 
 * Deploy Hub Vnet in the Management subscription
 * Deploy all spoke vnets in multiple Workload subscriptions
 * Create VNet peerings between Hub VNet and each Spoke VNet
+* Create an Azure Private DNS zone and linked it to all the hub and spoke VNet that were deployed in this pattern.
 
 >**IMPORTANT NOTE:** The deployment for VPN gateways and Bastion hosts can take very long time to finish. In my lab, this pipeline takes more than one (1) hour to execute. When using free Microsoft hosted agents, the maximum pipeline execution time is 60 minutes. Depending on your pipeline, if you are using Microsoft hosted agents, you may need to purchase an additional parallel job in order to increase the maximum execution time to 6 hours.
