@@ -1,0 +1,60 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "localVnetName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "metadata": {
+        "description": "Local VNet name"
+      }
+    },
+    "remoteVnetName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "metadata": {
+        "description": "Remote VNet name"
+      }
+    },
+    "remoteVnetSubscriptionId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "metadata": {
+        "description": "Remote VNet Subscription Id"
+      }
+    },
+    "remoteVnetResourceGroup": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 90,
+      "metadata": {
+        "description": "Remote VNet Resource Group"
+      }
+    }
+  },
+  "variables": {
+  },
+  "resources": [
+    {
+      "apiVersion": "2018-02-01",
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "name": "[concat(parameters('localVnetName'), '/gwPeering_', parameters('localVnetName'), 'To', parameters('remoteVnetName'))]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [],
+      "properties": {
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "allowGatewayTransit": false,
+        "useRemoteGateways": false,
+        "remoteVirtualNetwork": {
+          "id": "[concat('/subscriptions/', parameters('remoteVnetSubscriptionId'), '/resourceGroups/', parameters('remoteVnetResourceGroup'), '/providers/Microsoft.Network/virtualNetworks/', parameters('remoteVnetName'))]"
+        }
+      }
+    }
+  ],
+  "outputs": {
+  }
+}

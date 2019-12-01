@@ -1,0 +1,24 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "spokeVnetName": {
+      "value": "vnet-spoke-w0201"
+    },
+    "nsgName": {
+      "value": "nsg-workload-w0201"
+    },
+    "spokeVnetPrefix": {
+      "value": "10.201.0.0/16"
+    },
+    "spokeResourceSubnetPrefix": {
+      "value": "10.201.1.0/24"
+    },
+    "spokeBastionSubnetPrefix": {
+      "value": "10.201.251.0/24"
+    },
+    "deployBastion": {
+      "value": true
+    }
+  }
+}

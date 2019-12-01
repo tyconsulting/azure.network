@@ -1,0 +1,63 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "zoneName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "defaultValue": "taoyang.azure",
+      "metadata": {
+        "description": "The private DNS zone name"
+      }
+    },
+    "LinkedVNetResourceIds": {
+      "type": "array",
+      "metadata": {
+        "description": "The resource Ids of linked vnets"
+      }
+    }
+  },
+  "variables": {},
+  "resources": [
+    {
+      "tags": {
+        "displayName": "Private DNS Zone"
+      },
+      "type": "Microsoft.Network/privateDnsZones",
+      "apiVersion": "2018-09-01",
+      "name": "[parameters('zoneName')]",
+      "location": "global",
+      "properties": {
+        "maxNumberOfRecordSets": 25000,
+        "maxNumberOfVirtualNetworkLinks": 1000,
+        "maxNumberOfVirtualNetworkLinksWithRegistration": 100,
+        "numberOfRecordSets": 3,
+        "numberOfVirtualNetworkLinks": 1,
+        "numberOfVirtualNetworkLinksWithRegistration": 1,
+        "provisioningState": "Succeeded"
+      }
+    },
+    {
+      "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+      "apiVersion": "2018-09-01",
+      "copy" : {
+        "name": "vnetLinkCopy",
+        "count": "[length(parameters('LinkedVNetResourceIds'))]"
+      },
+      "name": "[concat(parameters('zoneName'), '/vnet', copyIndex())]",
+
+      "location": "global",
+      "dependsOn": [
+          "[resourceId('Microsoft.Network/privateDnsZones', parameters('zoneName'))]"
+      ],
+      "properties": {
+          "registrationEnabled": true,
+          "virtualNetwork": {
+              "id": "[parameters('LinkedVNetResourceIds')[copyIndex()]]"
+          }
+      }
+    }
+  ],
+  "outputs": {}
+}

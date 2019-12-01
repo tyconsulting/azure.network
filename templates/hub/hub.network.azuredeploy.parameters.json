@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "hubVnetPrefix": {
+      "value": "10.90.0.0/16"
+    },
+    "dmzSubnetPrefix": {
+      "value": "10.90.200.0/24"
+    },
+    "mgmtSubnetPrefix": {
+      "value": "10.90.1.0/24"
+    },
+    "sharedSubnetPrefix": {
+      "value": "10.90.2.0/24"
+    },
+    "gatewaySubnetPrefix": {
+      "value": "10.90.250.224/27"
+    },
+	  "aaddsSubnetPrefix": {
+      "value": "10.90.240.0/24"
+    },
+    "bastionSubnetPrefix": {
+      "value": "10.90.251.0/24"
+    },
+    "vpnConnectionType" : {
+      "value": "IPsec"
+    },
+    "vpnConnectionProtocol" : {
+      "value": "IKEv2"
+    },
+    "deployBastion": {
+      "value": true
+    }
+  }
+}

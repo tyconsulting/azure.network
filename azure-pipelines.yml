@@ -1,0 +1,326 @@
+name: $(BuildDefinitionName)_$(SourceBranchName)_$(Date:yyyyMMdd)$(Rev:.r)
+trigger:
+  branches:
+    include:
+    - master
+  paths:
+    exclude:
+    - 'README.md'
+    - 'images/*'
+  
+stages:
+- stage: test_and_build
+  jobs:
+  - job: Pester_Tests
+    variables:
+      - group: test - network
+    displayName: Pester Tests
+    pool:
+      name: Hosted Windows 2019 with VS2019
+      demands: azureps
+    steps:
+    - powershell: |
+        $FeedName = 'PSGallery'
+        Install-PackageProvider Nuget -Scope CurrentUser -Force
+        Install-module PSScriptAnalyzer -force -Scope CurrentUser -Repository $FeedName
+        Install-module PSPesterTest -force -Scope CurrentUser -Repository $FeedName
+      displayName: 'Install required PowerShell modules'
+
+    - task: richardfennellBM.BM-VSTS-PesterRunner-Task.Pester-Task.Pester@8
+      displayName: 'Pester Test Runner - Hub Network Template'
+      inputs:
+        scriptFolder: '@{Path=''$(System.DefaultWorkingDirectory)\tests\ARMTemplate\Test.ARMTemplate.ps1''; Parameters=@{TemplatePath =''$(System.DefaultWorkingDirectory)\templates\\hub\\hub.network.azuredeploy.json''; parameters =$(hubParameters); variables = $(hubVariables); resources = $(hubResources)}}'
+        resultsFile: '$(System.DefaultWorkingDirectory)\TEST-Hub-Network.xml'
+
+    - task: richardfennellBM.BM-VSTS-PesterRunner-Task.Pester-Task.Pester@8
+      displayName: 'Pester Test Runner - Spoke Network Template'
+      inputs:
+        scriptFolder: '@{Path=''$(System.DefaultWorkingDirectory)\tests\ARMTemplate\Test.ARMTemplate.ps1''; Parameters=@{TemplatePath =''$(System.DefaultWorkingDirectory)\templates\\spoke\\spoke.network.azuredeploy.json''; parameters =$(SpokeParameters); variables = $(SpokeVariables); resources = $(SpokeResources)}}'
+        resultsFile: '$(System.DefaultWorkingDirectory)\TEST-Spoke-Network.xml'
+
+    - task: richardfennellBM.BM-VSTS-PesterRunner-Task.Pester-Task.Pester@8
+      displayName: 'Pester Test Runner - VNet Peering Template'
+      inputs:
+        scriptFolder: '@{Path=''$(System.DefaultWorkingDirectory)\tests\ARMTemplate\Test.ARMTemplate.ps1''; Parameters=@{TemplatePath =''$(System.DefaultWorkingDirectory)\templates\\vnetPeering\\vnet.peering.azuredeploy.json''; parameters =$(peeringParameters); resources = $(peeringResources)}}'
+        resultsFile: '$(System.DefaultWorkingDirectory)\TEST-Network-Peering.xml'
+
+    - task: richardfennellBM.BM-VSTS-PesterRunner-Task.Pester-Task.Pester@8
+      displayName: 'Pester Test Runner - Private DNS Zone Template'
+      inputs:
+        scriptFolder: '@{Path=''$(System.DefaultWorkingDirectory)\tests\ARMTemplate\Test.ARMTemplate.ps1''; Parameters=@{TemplatePath =''$(System.DefaultWorkingDirectory)\templates\\private-dns-zone\\private.dns.zone.azuredeploy.json''; parameters =$(dnsZoneParameters); resources = $(dnsZoneResources)}}'
+        resultsFile: '$(System.DefaultWorkingDirectory)\TEST-Private-DNS-Zone.xml'
+
+    - task: PublishTestResults@2
+      displayName: 'Publish Test Results **/TEST-*.xml'
+      inputs:
+        testResultsFormat: NUnit
+
+  - job: ARM_Deployment_Validation
+    variables:
+    - group: variables - network
+    displayName: ARM Deployment Validation
+    dependsOn: Pester_Tests
+    pool:
+      name: Hosted Windows 2019 with VS2019
+      demands: azureps
+    steps:
+    - task: AzureResourceGroupDeployment@2
+      displayName: 'Template Validation - Hub Network Template'
+      inputs:
+        azureSubscription: 'sub-mgmt'
+        resourceGroupName: '$(hubResourceGroup)'
+        location: '$(hubLocation)'
+        csmFile: templates/hub/hub.network.azuredeploy.json
+        csmParametersFile: templates/hub/hub.network.azuredeploy.parameters.json
+        overrideParameters: '-hubVnetName $(hubVnetName) -localNetworkAddressPrefixes $(localNetworkAddressPrefixes) -localGatewayIpAddress $(localGatewayIpAddress) -deployVpnGateway $(deployVpnGateway) -IPSecSharedKey $(IPSecSharedKey) -deployAaddsSubnet $(deployAaddsSubnet)'
+        deploymentMode: Validation
+
+    - task: AzureResourceGroupDeployment@2
+      displayName: 'Template Validation - Spoke Network Template'
+      inputs:
+        azureSubscription: 'sub-workload-1'
+        resourceGroupName: '$(spokeResourceGroup0101)'
+        location: '$(spokeLocation0101)'
+        csmFile: templates/spoke/spoke.network.azuredeploy.json
+        csmParametersFile: templates/spoke/spoke.sub1.network1.azuredeploy.parameters.json
+        deploymentMode: Validation
+
+  - job: Publish_Pattern
+    displayName: Publish Pattern
+    dependsOn: 
+    - Pester_Tests
+    - ARM_Deployment_Validation
+    steps:
+    - task: CopyFiles@2
+      displayName: 'Copy Files to: $(Build.ArtifactStagingDirectory)'
+      inputs:
+        SourceFolder: '$(Build.SourcesDirectory)'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+        CleanTargetFolder: true
+        OverWrite: true
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Artifact: drop'
+
+- stage: lab_deploy
+  jobs:
+    - deployment: lab_deploy
+      variables:
+      - group: variables - network
+      displayName: 'Deploy Network Pattern to Lab environment'
+      pool:
+        name: Hosted Windows 2019 with VS2019
+        demands: azureps
+      timeoutInMinutes: 120
+      environment: 'lab'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Deploy Hub VNet in Management Subscription'
+              inputs:
+                azureSubscription: 'sub-mgmt'
+                resourceGroupName: '$(hubResourceGroup)'
+                location: '$(hubLocation)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/hub/hub.network.azuredeploy.json'
+                csmParametersFile: '$(Agent.BuildDirectory)/drop/templates/hub/hub.network.azuredeploy.parameters.json'
+                overrideParameters: '-hubVnetName $(hubVnetName) -localNetworkAddressPrefixes $(localNetworkAddressPrefixes) -localGatewayIpAddress $(localGatewayIpAddress) -deployVpnGateway $(deployVpnGateway) -IPSecSharedKey $(IPSecSharedKey) -deployAaddsSubnet $(deployAaddsSubnet)'
+                deploymentOutputs: hubVnetOutput
+
+            - task: PowerShell@2
+              inputs:
+                targetType: 'filePath'
+                filePath: '$(Agent.BuildDirectory)/drop/scripts/parse.arm.outputs.ps1'
+                arguments: -Output '$(hubVnetOutput)'
+                errorActionPreference: 'stop'
+              displayName: 'Parse Hub VNet deployment outputs'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Deploy Spoke VNet 0101 in Workload Subscription'
+              inputs:
+                azureSubscription: 'sub-workload-1'
+                resourceGroupName: '$(spokeResourceGroup0101)'
+                location: '$(spokeLocation0101)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.network.azuredeploy.json'
+                csmParametersFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.sub1.network1.azuredeploy.parameters.json'
+                deploymentOutputs: spokeVnet101Output
+
+            - task: PowerShell@2
+              inputs:
+                targetType: 'filePath'
+                filePath: '$(Agent.BuildDirectory)/drop/scripts/parse.arm.outputs.ps1'
+                arguments: -Output '$(spokeVnet101Output)' -variableNameSuffix '101'
+                errorActionPreference: 'stop'
+              displayName: 'Parse Spoke VNet 0101 deployment outputs'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Deploy Spoke VNet 0102 in Workload Subscription'
+              inputs:
+                azureSubscription: 'sub-workload-1'
+                resourceGroupName: '$(spokeResourceGroup0102)'
+                location: '$(spokeLocation0102)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.network.azuredeploy.json'
+                csmParametersFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.sub1.network2.azuredeploy.parameters.json'
+                deploymentOutputs: spokeVnet102Output
+
+            - task: PowerShell@2
+              inputs:
+                targetType: 'filePath'
+                filePath: '$(Agent.BuildDirectory)/drop/scripts/parse.arm.outputs.ps1'
+                arguments: -Output '$(spokeVnet102Output)' -variableNameSuffix '102'
+                errorActionPreference: 'stop'
+              displayName: 'Parse Spoke VNet 0102 deployment outputs'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Deploy Spoke VNet 0103 in Workload Subscription'
+              inputs:
+                azureSubscription: 'sub-workload-1'
+                resourceGroupName: '$(spokeResourceGroup0103)'
+                location: '$(spokeLocation0103)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.network.azuredeploy.json'
+                csmParametersFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.sub1.network3.azuredeploy.parameters.json'
+                deploymentOutputs: spokeVnet103Output
+
+            - task: PowerShell@2
+              inputs:
+                targetType: 'filePath'
+                filePath: '$(Agent.BuildDirectory)/drop/scripts/parse.arm.outputs.ps1'
+                arguments: -Output '$(spokeVnet103Output)' -variableNameSuffix '103'
+                errorActionPreference: 'stop'
+              displayName: 'Parse Spoke VNet 0103 deployment outputs'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Deploy Spoke VNet 0201 in Workload Subscription'
+              inputs:
+                azureSubscription: 'sub-workload-2'
+                resourceGroupName: '$(spokeResourceGroup0201)'
+                location: '$(spokeLocation0201)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.network.azuredeploy.json'
+                csmParametersFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.sub2.network1.azuredeploy.parameters.json'
+                deploymentOutputs: spokeVnet201Output
+
+            - task: PowerShell@2
+              inputs:
+                targetType: 'filePath'
+                filePath: '$(Agent.BuildDirectory)/drop/scripts/parse.arm.outputs.ps1'
+                arguments: -Output '$(spokeVnet201Output)' -variableNameSuffix '201'
+                errorActionPreference: 'stop'
+              displayName: 'Parse Spoke VNet 0201 deployment outputs'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Deploy Spoke VNet 0202 in Workload Subscription'
+              inputs:
+                azureSubscription: 'sub-workload-2'
+                resourceGroupName: '$(spokeResourceGroup0202)'
+                location: '$(spokeLocation0202)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.network.azuredeploy.json'
+                csmParametersFile: '$(Agent.BuildDirectory)/drop/templates/spoke/spoke.sub2.network2.azuredeploy.parameters.json'
+                deploymentOutputs: spokeVnet202Output
+
+            - task: PowerShell@2
+              inputs:
+                targetType: 'filePath'
+                filePath: '$(Agent.BuildDirectory)/drop/scripts/parse.arm.outputs.ps1'
+                arguments: -Output '$(spokeVnet202Output)' -variableNameSuffix '202'
+                errorActionPreference: 'stop'
+              displayName: 'Parse Spoke VNet 0202 deployment outputs'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Spoke VNet 0101 to Hub VNet'
+              inputs:
+                azureSubscription: 'sub-workload-1'
+                resourceGroupName: '$(spokeResourceGroup0101)'
+                location: '$(spokeLocation0101)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(spokeVnetName0101) -remoteVnetName $(hubVNetName) -remoteVnetSubscriptionId "$(hubVnetSubId)" -remoteVnetResourceGroup $(hubResourceGroup)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Spoke VNet 0102 to Hub VNet'
+              inputs:
+                azureSubscription: 'sub-workload-1'
+                resourceGroupName: '$(spokeResourceGroup0102)'
+                location: '$(spokeLocation0102)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(spokeVnetName0102) -remoteVnetName $(hubVNetName) -remoteVnetSubscriptionId "$(hubVnetSubId)" -remoteVnetResourceGroup $(hubResourceGroup)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Spoke VNet 0103 to Hub VNet'
+              inputs:
+                azureSubscription: 'sub-workload-1'
+                resourceGroupName: '$(spokeResourceGroup0103)'
+                location: '$(spokeLocation0103)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(spokeVnetName0103) -remoteVnetName $(hubVNetName) -remoteVnetSubscriptionId "$(hubVnetSubId)" -remoteVnetResourceGroup $(hubResourceGroup)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Spoke VNet 0201 to Hub VNet'
+              inputs:
+                azureSubscription: 'sub-workload-2'
+                resourceGroupName: '$(spokeResourceGroup0201)'
+                location: '$(spokeLocation0201)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(spokeVnetName0201) -remoteVnetName $(hubVNetName) -remoteVnetSubscriptionId "$(hubVnetSubId)" -remoteVnetResourceGroup $(hubResourceGroup)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Spoke VNet 0202 to Hub VNet'
+              inputs:
+                azureSubscription: 'sub-workload-2'
+                resourceGroupName: '$(spokeResourceGroup0202)'
+                location: '$(spokeLocation0202)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(spokeVnetName0202) -remoteVnetName $(hubVNetName) -remoteVnetSubscriptionId "$(hubVnetSubId)" -remoteVnetResourceGroup $(hubResourceGroup)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Hub VNet to Spoke VNet 0101'
+              inputs:
+                azureSubscription: 'sub-mgmt'
+                resourceGroupName: '$(hubResourceGroup)'
+                location: '$(hubLocation)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(hubVnetName) -remoteVnetName $(spokeVnetName0101) -remoteVnetSubscriptionId "$(spokeVnetSubId101)" -remoteVnetResourceGroup $(spokeResourceGroup0101)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Hub VNet to Spoke VNet 0102'
+              inputs:
+                azureSubscription: 'sub-mgmt'
+                resourceGroupName: '$(hubResourceGroup)'
+                location: '$(hubLocation)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(hubVnetName) -remoteVnetName $(spokeVnetName0102) -remoteVnetSubscriptionId "$(spokeVnetSubId102)" -remoteVnetResourceGroup $(spokeResourceGroup0102)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Hub VNet to Spoke VNet 0103'
+              inputs:
+                azureSubscription: 'sub-mgmt'
+                resourceGroupName: '$(hubResourceGroup)'
+                location: '$(hubLocation)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(hubVnetName) -remoteVnetName $(spokeVnetName0103) -remoteVnetSubscriptionId "$(spokeVnetSubId103)" -remoteVnetResourceGroup $(spokeResourceGroup0103)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Hub VNet to Spoke VNet 0201'
+              inputs:
+                azureSubscription: 'sub-mgmt'
+                resourceGroupName: '$(hubResourceGroup)'
+                location: '$(hubLocation)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(hubVnetName) -remoteVnetName $(spokeVnetName0201) -remoteVnetSubscriptionId "$(spokeVnetSubId201)" -remoteVnetResourceGroup $(spokeResourceGroup0201)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Peer Hub VNet to Spoke VNet 0202'
+              inputs:
+                azureSubscription: 'sub-mgmt'
+                resourceGroupName: '$(hubResourceGroup)'
+                location: '$(hubLocation)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/vNetPeering/vnet.peering.azuredeploy.json'
+                overrideParameters: '-localVnetName $(hubVnetName) -remoteVnetName $(spokeVnetName0202) -remoteVnetSubscriptionId "$(spokeVnetSubId202)" -remoteVnetResourceGroup $(spokeResourceGroup0202)'
+
+            - task: AzureResourceGroupDeployment@2
+              displayName: 'Deploy Azure Private DNS Zone'
+              inputs:
+                azureSubscription: 'sub-mgmt'
+                resourceGroupName: '$(hubResourceGroup)'
+                location: '$(hubLocation)'
+                csmFile: '$(Agent.BuildDirectory)/drop/templates/private-dns-zone/private.dns.zone.azuredeploy.json'
+                overrideParameters: '-zoneName $(dnsZoneName) -LinkedVNetResourceIds ["$(hubVNetResourceId)", "$(spokeVNetResourceId101)", "$(spokeVNetResourceId102)", "$(spokeVNetResourceId103)", "$(spokeVNetResourceId201)", "$(spokeVNetResourceId202)"]'

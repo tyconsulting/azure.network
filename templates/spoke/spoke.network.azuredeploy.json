@@ -1,0 +1,325 @@
+﻿{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "spokeVnetName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "defaultValue": "vnet-spoke-m01",
+      "metadata": {
+        "description": "The workload spoke VNet name"
+      }
+    },
+    "nsgName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "defaultValue": "nsg-workload-m01",
+      "metadata": {
+        "description": "The workload spoke VNet NSG name"
+      }
+    },
+    "spokeVnetPrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "The workload spoke vnet CIDR address"
+      }
+    },
+    "spokeResourceSubnetPrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "The CIDR address for the resource subnet in the spoke vnet "
+      }
+    },
+    "spokeBastionSubnetPrefix": {
+      "type": "string",
+      "metadata": {
+        "description": "The CIDR address for the Azure Bastion Host subnet in the spoke vnet "
+      }
+    },
+    "deployBastion": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "whether the Azure Bastion host is deployed to this vNet"
+      }
+    }
+  },
+  "variables": {
+    "spokeResourceSubnetName": "ResourceSubnet1",
+    "spokeBastionSubnetName": "AzureBastionSubnet",
+    "nsgName": "[parameters('nsgName')]",
+    "bastionPipName": "[concat('pip-', parameters('spokeVnetName'),'-bastion')]",
+    "bastionName": "[concat('bastion-', parameters('spokeVnetName'))]"
+  },
+  "resources": [
+    {
+      "tags": {
+        "displayName": "workload spoke vnet"
+      },
+      "type": "Microsoft.Network/virtualNetworks",
+      "name": "[parameters('spokeVnetName')]",
+      "apiVersion": "2018-02-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[parameters('spokeVnetPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('spokeResourceSubnetName')]",
+            "properties": {
+              "addressPrefix": "[parameters('spokeResourceSubnetPrefix')]",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+              },
+              "serviceEndpoints": [
+                {
+                  "service": "Microsoft.ContainerRegistry"
+                },
+                {
+                  "service": "Microsoft.Web"
+                },
+                {
+                  "service": "Microsoft.EventHub"
+                },
+                {
+                  "service": "Microsoft.Storage"
+                },
+                {
+                  "service": "Microsoft.AzureActiveDirectory"
+                },
+                {
+                  "service": "Microsoft.AzureCosmosDB"
+                },
+                {
+                  "service": "Microsoft.KeyVault"
+                },
+                {
+                  "service": "Microsoft.ServiceBus"
+                },
+                {
+                  "service": "Microsoft.Sql"
+                }
+              ]
+            }
+          },
+          {
+            "name": "[variables('spokeBastionSubnetName')]",
+            "properties": {
+              "addressPrefix": "[parameters('spokeBastionSubnetPrefix')]",
+              "serviceEndpoints": []
+            }
+          }
+        ],
+        "enableDdosProtection": false,
+        "enableVmProtection": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+      ]
+    },
+    {
+      "condition": "[equals(parameters('deployBastion'), bool('true'))]",
+      "tags": {
+        "displayName": "bastion PIP"
+      },
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2019-09-01",
+      "name": "[variables('bastionPipName')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "condition": "[equals(parameters('deployBastion'), bool('true'))]",
+      "tags": {
+        "displayName": "bastion host"
+      },
+      "type": "Microsoft.Network/bastionHosts",
+      "apiVersion": "2019-09-01",
+      "name": "[variables('bastionName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', parameters('spokeVnetName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "IpConf",
+            "properties": {
+                "publicIPAddress": {
+                    "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName'))]"
+                },
+                "subnet": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('spokeVnetName'), variables('spokeBastionSubnetName'))]"
+                }
+              }
+          }
+        ]
+      }
+    },
+    {
+      "tags": {
+        "displayName": "workload nsg"
+      },
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('nsgName')]",
+      "apiVersion": "2018-02-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "NSG_RULE_INBOUND_RDP",
+            "properties": {
+              "description": "Allow inbound RDP",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "3389",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 1000,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "NSG_RULE_INBOUND_HTTPS",
+            "properties": {
+              "description": "Allow inbound HTTPS",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "443",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 1001,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "NSG_RULE_INBOUND_SSH",
+            "properties": {
+              "description": "Allow inbound SSH",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "22",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 1002,
+              "direction": "Inbound"
+            }
+          }
+        ],
+        "defaultSecurityRules": [
+          {
+            "name": "AllowVnetInBound",
+            "properties": {
+              "description": "Allow inbound traffic from all VMs in VNET",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "destinationAddressPrefix": "VirtualNetwork",
+              "access": "Allow",
+              "priority": 65000,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowAzureLoadBalancerInBound",
+            "properties": {
+              "description": "Allow inbound traffic from azure load balancer",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "AzureLoadBalancer",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 65001,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "DenyAllInBound",
+            "properties": {
+              "description": "Deny all inbound traffic",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Deny",
+              "priority": 65500,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowVnetOutBound",
+            "properties": {
+              "description": "Allow outbound traffic from all VMs to all VMs in VNET",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "destinationAddressPrefix": "VirtualNetwork",
+              "access": "Allow",
+              "priority": 65000,
+              "direction": "Outbound"
+            }
+          },
+          {
+            "name": "AllowInternetOutBound",
+            "properties": {
+              "description": "Allow outbound traffic from all VMs to Internet",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "Internet",
+              "access": "Allow",
+              "priority": 65001,
+              "direction": "Outbound"
+            }
+          },
+          {
+            "name": "DenyAllOutBound",
+            "properties": {
+              "description": "Deny all outbound traffic",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Deny",
+              "priority": 65500,
+              "direction": "Outbound"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+
+      ]
+    }
+  ],
+  "outputs": {
+     "spokeVnetSubId": {
+       "type": "string",
+       "value": "[subscription().subscriptionId]"
+     },
+     "spokeVNetResourceId": {
+       "type": "string",
+       "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('spokeVnetName'))]"
+     }
+  }
+}

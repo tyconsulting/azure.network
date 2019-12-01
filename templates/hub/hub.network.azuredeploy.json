@@ -1,0 +1,740 @@
+{
+   "$schema":"https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+   "contentVersion":"1.0.0.0",
+  "parameters": {
+    "hubVnetName": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "defaultValue": "vnet-hub01",
+      "metadata": {
+        "description": "Hub VNet name"
+      }
+    },
+    "deployVpnGateway": {
+      "type": "string",
+      "defaultValue": "No",
+      "allowedValues": [
+        "Yes",
+        "No"
+      ],
+      "metadata": {
+        "description": "Whether or not to deploy a VPN Gateway in the Hub VNet"
+      }
+    },
+    "deployAaddsSubnet": {
+      "type": "string",
+      "defaultValue": "No",
+      "allowedValues": [
+        "Yes",
+        "No"
+      ],
+      "metadata": {
+        "description": "Whether or not to deploy a subnet for Azure AD Domain Services in the Hub VNet"
+      }
+    },
+    "gatewaySku": {
+      "type": "string",
+      "defaultValue": "Basic",
+      "allowedValues": [
+        "Basic",
+        "VpnGw1",
+        "VpnGw2",
+        "VpnGw3"
+      ],
+      "metadata": {
+        "description": "The SKU of the Gateway, if deployed"
+      }
+    },
+    "hubVnetPrefix": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 18,
+      "metadata": {
+        "description": "Hub VNet address prefix"
+      }
+    },
+    "dmzSubnetPrefix": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 18,
+      "metadata": {
+        "description": "DMZ Subnet address prefix"
+      }
+    },
+    "mgmtSubnetPrefix": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 18,
+      "metadata": {
+        "description": "Management Subnet address prefix"
+      }
+    },
+    "sharedSubnetPrefix": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 18,
+      "metadata": {
+        "description": "Shared Subnet address prefix"
+      }
+    },
+    "gatewaySubnetPrefix": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 18,
+      "metadata": {
+        "description": "Gateway Subnet address prefix"
+      }
+    },
+    "aaddsSubnetPrefix": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 18,
+      "metadata": {
+        "description": "AAD Domain Services address prefix"
+      }
+    },
+    "bastionSubnetPrefix": {
+      "type": "string",
+      "minLength": 9,
+      "maxLength": 18,
+      "metadata": {
+        "description": "Bastion Subnet address prefix"
+      }
+    },
+    "localNetworkAddressPrefixes": {
+      "type": "array",
+      "metadata": {
+        "description": "The local network segments in CIDR format"
+      }
+    },
+    "localGatewayIpAddress": {
+      "type": "string",
+      "metadata": {
+        "description": "The IP address for the local network VPN gateway"
+      }
+    },
+    "vpnConnectionType": {
+      "type": "string",
+      "defaultValue": "IPsec",
+      "allowedValues": [
+        "IPsec",
+        "Vnet2Vnet",
+        "ExpressRoute",
+        "VPNClient"
+      ],
+      "metadata": {
+        "description": "VPN Connection Type"
+      }
+    },
+    "vpnConnectionProtocol": {
+      "type": "string",
+      "defaultValue": "IKEv2",
+      "allowedValues": [
+        "IKEv2",
+        "IKEv1"
+      ],
+      "metadata": {
+        "description": "VPN Connection Protocol"
+      }
+    },
+    "IPSecSharedKey": {
+      "type": "string",
+      "minLength": 8,
+      "metadata": {
+        "description": "IPSec shared key"
+      }
+    },
+    "deployBastion": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "whether the Azure Bastion host is deployed to this vNet"
+      }
+    }
+  },
+  "variables": {
+    "dmzSubnetName": "dmz",
+    "mgmtSubnetName": "management",
+    "sharedSubnetName": "shared",
+    "gatewaySubnetName": "GatewaySubnet",
+    "aaddsSubnetName": "DomainServices",
+    "gatewayName": "vpnGW-hub01",
+    "gatewayPIPName": "pip-vpnGW-hub01",
+    "localNetworkGatewayName": "localGW-onPrem",
+    "vpnConnectionName": "connection-onprem",
+    "subnetGatewayId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('gatewaySubnetName'))]",
+    "nsgName": "nsg-management",
+    "aaddsNsgName": "nsg-aadds",
+    "bastionSubnetName": "AzureBastionSubnet",
+    "bastionPipName": "[concat('pip-', parameters('hubVnetName'),'-bastion')]",
+    "bastionName": "[concat('bastion-', parameters('hubVnetName'))]"
+  },
+  "resources": [
+    {
+      "tags": {
+        "displayName": "hub vnet"
+      },
+      "type": "Microsoft.Network/virtualNetworks",
+      "name": "[parameters('hubVnetName')]",
+      "apiVersion": "2018-02-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[parameters('hubVnetPrefix')]"
+          ]
+        },
+        "enableDdosProtection": false,
+        "enableVmProtection": false
+      },
+      "resources": [
+        {
+          "type": "subnets",
+          "name": "[variables('mgmtSubnetName')]",
+          "apiVersion": "2018-02-01",
+          "properties": {
+            "addressPrefix": "[parameters('mgmtSubnetPrefix')]",
+            "networkSecurityGroup": {
+              "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+            }
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+          ]
+        },
+        {
+          "type": "subnets",
+          "name": "[variables('sharedSubnetName')]",
+          "apiVersion": "2018-02-01",
+          "properties": {
+            "addressPrefix": "[parameters('sharedSubnetPrefix')]",
+            "networkSecurityGroup": {
+              "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+            },
+            "serviceEndpoints": [
+              {
+                "service": "Microsoft.ContainerRegistry"
+              },
+              {
+                "service": "Microsoft.Web"
+              },
+              {
+                "service": "Microsoft.EventHub"
+              },
+              {
+                "service": "Microsoft.Storage"
+              },
+              {
+                "service": "Microsoft.AzureActiveDirectory"
+              },
+              {
+                "service": "Microsoft.AzureCosmosDB"
+              },
+              {
+                "service": "Microsoft.KeyVault"
+              },
+              {
+                "service": "Microsoft.ServiceBus"
+              },
+              {
+                "service": "Microsoft.Sql"
+              }
+            ]
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('mgmtSubnetName'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+          ]
+        },
+        {
+          "type": "subnets",
+          "name": "[variables('dmzSubnetName')]",
+          "apiVersion": "2018-02-01",
+          "properties": {
+            "addressPrefix": "[parameters('dmzSubnetPrefix')]",
+            "networkSecurityGroup": {
+              "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+            }
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('mgmtSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('sharedSubnetName'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+          ]
+        },
+        {
+          "condition": "[equals(parameters('deployAaddsSubnet'), 'Yes')]",
+          "type": "subnets",
+          "name": "[variables('aaddsSubnetName')]",
+          "apiVersion": "2018-02-01",
+          "properties": {
+            "addressPrefix": "[parameters('aaddsSubnetPrefix')]",
+            "networkSecurityGroup": {
+              "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('aaddsNsgName'))]"
+            }
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('mgmtSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('sharedSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('dmzSubnetName'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('aaddsNsgName'))]"
+          ]
+        },
+        {
+          "type": "subnets",
+          "name": "[variables('bastionSubnetName')]",
+          "apiVersion": "2018-02-01",
+          "properties": {
+            "addressPrefix": "[parameters('bastionSubnetPrefix')]"
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('mgmtSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('sharedSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('dmzSubnetName'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('aaddsNsgName'))]"
+          ]
+        },  
+        {
+          "condition": "[equals(parameters('deployVpnGateway'), 'Yes')]",
+          "type": "subnets",
+          "name": "[variables('gatewaySubnetName')]",
+          "apiVersion": "2018-02-01",
+          "properties": {
+            "addressPrefix": "[parameters('gatewaySubnetPrefix')]"
+          },
+          "dependsOn": [
+            "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('mgmtSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('sharedSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('dmzSubnetName'))]",
+            "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('bastionSubnetName'))]",
+            "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+          ]
+        }
+      ],
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+      ]
+    },
+    {
+      "condition": "[equals(parameters('deployBastion'), bool('true'))]",
+      "tags": {
+        "displayName": "bastion PIP"
+      },
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2019-09-01",
+      "name": "[variables('bastionPipName')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static"
+      }
+    },
+    {
+      "condition": "[equals(parameters('deployBastion'), bool('true'))]",
+      "tags": {
+        "displayName": "bastion host"
+      },
+      "type": "Microsoft.Network/bastionHosts",
+      "apiVersion": "2019-09-01",
+      "name": "[variables('bastionName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('bastionSubnetName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "IpConf",
+            "properties": {
+                "publicIPAddress": {
+                    "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('bastionPipName'))]"
+                },
+                "subnet": {
+                    "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('bastionSubnetName'))]"
+                }
+              }
+          }
+        ]
+      }
+    },
+    {
+      "tags": {
+        "displayName": "management nsg"
+      },
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('nsgName')]",
+      "apiVersion": "2018-02-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "NSG_RULE_INBOUND_RDP",
+            "properties": {
+              "description": "Allow inbound RDP",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "3389",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 1000,
+              "direction": "Inbound"
+            }
+          }
+        ],
+        "defaultSecurityRules": [
+          {
+            "name": "AllowVnetInBound",
+            "properties": {
+              "description": "Allow inbound traffic from all VMs in VNET",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "destinationAddressPrefix": "VirtualNetwork",
+              "access": "Allow",
+              "priority": 65000,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowAzureLoadBalancerInBound",
+            "properties": {
+              "description": "Allow inbound traffic from azure load balancer",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "AzureLoadBalancer",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 65001,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "DenyAllInBound",
+            "properties": {
+              "description": "Deny all inbound traffic",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Deny",
+              "priority": 65500,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowVnetOutBound",
+            "properties": {
+              "description": "Allow outbound traffic from all VMs to all VMs in VNET",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "destinationAddressPrefix": "VirtualNetwork",
+              "access": "Allow",
+              "priority": 65000,
+              "direction": "Outbound"
+            }
+          },
+          {
+            "name": "AllowInternetOutBound",
+            "properties": {
+              "description": "Allow outbound traffic from all VMs to Internet",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "Internet",
+              "access": "Allow",
+              "priority": 65001,
+              "direction": "Outbound"
+            }
+          },
+          {
+            "name": "DenyAllOutBound",
+            "properties": {
+              "description": "Deny all outbound traffic",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Deny",
+              "priority": 65500,
+              "direction": "Outbound"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+
+      ]
+    },
+    {
+      "condition": "[equals(parameters('deployAaddsSubnet'), 'Yes')]",
+      "tags": {
+        "displayName": "aadds nsg"
+      },
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "name": "[variables('aaddsNsgName')]",
+      "apiVersion": "2018-02-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "NSG_RULE_INBOUND_AAD_SYNC",
+            "properties": {
+              "description": "Allow Sync With Azure AD",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "443",
+              "sourceAddressPrefix": "AzureActiveDirectoryDomainServices",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 101,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "NSG_RULE_INBOUND_RDP",
+            "properties": {
+              "description": "Allow RDP",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "3389",
+              "sourceAddressPrefix": "CorpNetSaw",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 201,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "NSG_RULE_INBOUND_PS_REMOTING",
+            "properties": {
+              "description": "Allow PS Remoting",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "5986",
+              "sourceAddressPrefix": "AzureActiveDirectoryDomainServices",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 301,
+              "direction": "Inbound"
+            }
+          }
+        ],
+        "defaultSecurityRules": [
+          {
+            "name": "AllowVnetInBound",
+            "properties": {
+              "description": "Allow inbound traffic from all VMs in VNET",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "destinationAddressPrefix": "VirtualNetwork",
+              "access": "Allow",
+              "priority": 65000,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowAzureLoadBalancerInBound",
+            "properties": {
+              "description": "Allow inbound traffic from azure load balancer",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "AzureLoadBalancer",
+              "destinationAddressPrefix": "*",
+              "access": "Allow",
+              "priority": 65001,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "DenyAllInBound",
+            "properties": {
+              "description": "Deny all inbound traffic",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Deny",
+              "priority": 65500,
+              "direction": "Inbound"
+            }
+          },
+          {
+            "name": "AllowVnetOutBound",
+            "properties": {
+              "description": "Allow outbound traffic from all VMs to all VMs in VNET",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "VirtualNetwork",
+              "destinationAddressPrefix": "VirtualNetwork",
+              "access": "Allow",
+              "priority": 65000,
+              "direction": "Outbound"
+            }
+          },
+          {
+            "name": "AllowInternetOutBound",
+            "properties": {
+              "description": "Allow outbound traffic from all VMs to Internet",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "Internet",
+              "access": "Allow",
+              "priority": 65001,
+              "direction": "Outbound"
+            }
+          },
+          {
+            "name": "DenyAllOutBound",
+            "properties": {
+              "description": "Deny all outbound traffic",
+              "protocol": "*",
+              "sourcePortRange": "*",
+              "destinationPortRange": "*",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*",
+              "access": "Deny",
+              "priority": 65500,
+              "direction": "Outbound"
+            }
+          }
+        ]
+      },
+      "dependsOn": [
+
+      ]
+    },
+    {
+      "tags": {
+        "displayName": "gateway pip"
+      },
+      "condition": "[equals(parameters('deployVpnGateway'), 'Yes')]",
+      "apiVersion": "2018-02-01",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[variables('gatewayPIPName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic"
+      }
+    },
+    {
+      "tags": {
+        "displayName": "vnet gateway"
+      },
+      "condition": "[equals(parameters('deployVpnGateway'), 'Yes')]",
+      "apiVersion": "2017-10-01",
+      "type": "Microsoft.Network/virtualNetworkGateways",
+      "name": "[variables('gatewayName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('gatewayPIPName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('hubVnetName'), variables('gatewaySubnetName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[variables('subnetGatewayId')]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('gatewayPIPName'))]"
+              }
+            },
+            "name": "vnetGatewayConfig"
+          }
+        ],
+        "sku": {
+          "name": "[parameters('gatewaySku')]",
+          "tier": "[parameters('gatewaySku')]"
+        },
+        "gatewayType": "Vpn",
+        "vpnType": "RouteBased",
+        "enableBgp": "false"
+      }
+    },
+    {
+      "tags": {
+        "displayName": "vpn connection"
+      },
+      "condition": "[equals(parameters('deployVpnGateway'), 'Yes')]",
+      "type": "Microsoft.Network/connections",
+      "apiVersion": "2019-09-01",
+      "name": "[variables('vpnConnectionName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+          "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('gatewayName'))]",
+          "[resourceId('Microsoft.Network/localNetworkGateways', variables('localNetworkGatewayName'))]"
+      ],
+      "properties": {
+          "virtualNetworkGateway1": {
+              "id": "[resourceId('Microsoft.Network/virtualNetworkGateways', variables('gatewayName'))]"
+          },
+          "localNetworkGateway2": {
+              "id": "[resourceId('Microsoft.Network/localNetworkGateways', variables('localNetworkGatewayName'))]"
+          },
+          "connectionType": "[parameters('vpnConnectionType')]",
+          "connectionProtocol": "[parameters('vpnConnectionProtocol')]",
+          "routingWeight": 0,
+          "sharedKey": "[parameters('IPSecSharedKey')]",
+          "enableBgp": false,
+          "usePolicyBasedTrafficSelectors": false,
+          "ipsecPolicies": [],
+          "trafficSelectorPolicies": [],
+          "expressRouteGatewayBypass": false
+      }
+    },
+    {
+      "tags": {
+        "displayName": "local network gateway"
+      },
+      "condition": "[equals(parameters('deployVpnGateway'), 'Yes')]",
+      "type": "Microsoft.Network/localNetworkGateways",
+      "name": "[variables('localNetworkGatewayName')]",
+      "apiVersion": "2018-08-01",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "localNetworkAddressSpace": {
+          "addressPrefixes": "[parameters('localNetworkAddressPrefixes')]"
+        },
+        "gatewayIpAddress": "[parameters('localGatewayIpAddress')]"
+      }
+    }
+  ],
+   "outputs":{
+     "hubVnetSubId": {
+       "type": "string",
+       "value": "[subscription().subscriptionId]"
+     },
+     "hubVNetResourceId": {
+       "type": "string",
+       "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('hubVnetName'))]"
+     }
+   }
+}
