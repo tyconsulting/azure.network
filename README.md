@@ -14,7 +14,7 @@ This repository contains the Network pattern for Tao's lab Azure tenant. In depl
 ## Network Configuration
 
 The network pattern consists of a hub Vnet and multiple spoke Vnets spanned across multiple subscriptions within a same Azure AD tenant (as shown below)
-![001](./images/Lab_VNet.png)
+![001](./images/lab_vnet.png)
 
 ### Hub Networks
 
