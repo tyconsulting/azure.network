@@ -39,6 +39,7 @@ The Pipeline requires the following objects need to be created in Azure DevOps p
 ### Marketplace Extensions
 
 This pipeline uses tasks from the following extensions that can be installed via Azure DevOps Marketplace:
+
 | Name | Link |
 |:-----|:-----|
 | Pester Test Runner Build Task | <https://marketplace.visualstudio.com/items?itemName=richardfennellBM.BM-VSTS-PesterRunner-Task> |
